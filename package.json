@@ -2,16 +2,16 @@
   "name": "leapfrog-app",
   "version": "1.0.0",
   "main": "index.js",
-"scripts": {
-  "test": "echo \"Error: no test specified\" && exit 1",
-  "dev": "concurrently \"npm run dev:react\" \"npm run dev:electron\" \"npm run dev:backend\"",
-  "dev:react": "vite",
-  "dev:electron": "cd electron && electronmon index.js --watch index.js,src/**/* --ignore '/backend/.*'",
-  "dev:backend": "source .venv/bin/activate && python -u backend/app.py",
-  "build": "vite build",
-  "package": "electron-forge package",
-  "make": "electron-forge make"
-},
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev": "concurrently \"npm run dev:react\" \"npm run dev:electron\" \"npm run dev:backend\"",
+    "dev:react": "vite",
+    "dev:electron": "cd electron && electronmon index.js --watch index.js,src/**/* --ignore '/backend/.*'",
+    "dev:backend": "source .venv/bin/activate && python -u backend/app.py",
+    "build": "vite build",
+    "package": "electron-forge package",
+    "make": "electron-forge make"
+  },
   "keywords": [],
   "author": "",
   "license": "ISC",
