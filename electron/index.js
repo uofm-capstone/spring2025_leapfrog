@@ -30,6 +30,11 @@ ipcMain.handle('open-directory-dialog', async () => {
   return result.filePaths[0] || null; // Return folder path or null if canceled
 });
 
+// Add new IPC handler for switching CNN models
+ipcMain.handle('switch-cnn-model', async (event, modelId) => {
+  // ... rest of the handler code from my previous response
+});
+
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit();

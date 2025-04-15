@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import FrogChart from "./FrogChart";
+import ModelSelector from './ModelSelector';
 
 interface DashboardProps {
   onSortClick: () => void;

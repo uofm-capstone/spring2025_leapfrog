@@ -1,80 +1,203 @@
 import os
-import json
+import sys
+import argparse
 import numpy as np
 from tensorflow.keras.models import load_model
 from tensorflow.keras.preprocessing import image
-from datetime import datetime
+import json
+import glob
 
-def process_images(folder_path):
-    model = load_model(os.path.join(".", "backend", "frog_detector.h5"))
+# Dictionary of available models
+MODEL_OPTIONS = {
+    'frog_detector': 'frog_detector.h5',
+    'enhanced_detector': 'enhanced_detector.h5',  # Add these models or create them
+    'lightweight_model': 'lightweight_model.h5'   # Add these models or create them
+}
 
-    processed_files = []
+# Default model to use
+current_model_id = 'frog_detector'
 
-    image_files = [os.path.join(folder_path, f) for f in os.listdir(folder_path) if f.lower().endswith(".jpg")]
+def load_specific_model(model_id):
+    """Load a specific CNN model based on model_id"""
+    global current_model_id
+    
+    # Validate model_id
+    if model_id not in MODEL_OPTIONS:
+        raise ValueError(f"Invalid model ID: {model_id}. Available models: {list(MODEL_OPTIONS.keys())}")
+    
+    model_path = os.path.join(os.path.dirname(__file__), MODEL_OPTIONS[model_id])
+    
+    # Check if model file exists
+    if not os.path.exists(model_path):
+        raise FileNotFoundError(f"Model file not found: {model_path}")
+    
+    # Load the model
+    model = load_model(model_path)
+    current_model_id = model_id
+    
+    return model
 
-    # Initialize stats counters
-    frog_count = 0
-    not_frog_count = 0
-    confidence_total = 0.0
-    last_file = ""
-
-    # Process and classify images
-    for img_path in image_files:
-        try:
-            img = image.load_img(img_path, target_size=(224, 224), color_mode="rgb")
-            img_array = image.img_to_array(img) / 255.0
-
-            # Convert to grayscale and replicate to three channels
-            img_array = np.mean(img_array, axis=-1, keepdims=True)
-            img_array = np.repeat(img_array, 3, axis=-1)
-            img_array = np.expand_dims(img_array, axis=0)
-
-            prediction = model.predict(img_array)[0][0]
-
-            if prediction > 0.5:
-                label = "NOT FROG"
-                not_frog_count += 1
-                file_conf = prediction
-            else:
-                label = "FROG"
-                frog_count += 1
-                file_conf = 1 - prediction
-
-            confidence_total += file_conf
-            # Store file details instead of just name:
-            processed_files.append({
-                "name": os.path.basename(img_path),
-                "classification": label,
-                "confidence": round(file_conf * 100)  # store as percentage integer
-            })
-            last_file = img_path
-            print(f"{os.path.basename(img_path)} says: {label}; conf: {round(file_conf * 100)}")
-        except Exception as e:
-            print(f"Error processing {img_path}: {e}")
-
-    total_processed = frog_count + not_frog_count
-    average_confidence = round((confidence_total / total_processed) * 100) if total_processed > 0 else 0
-
-    runDate = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    stats = {
-        "runDate": runDate,
-        "frogs": frog_count,
-        "notFrogs": not_frog_count,
-        "confidence": average_confidence,
-        "files": processed_files,
-        "totalFiles": f"{total_processed}",
-        "currentFile": last_file
-    }
-
-    # Save this run’s stats to a file for later retrieval.
-    runs_file = os.path.join(".", "backend", "runs.json")
+def set_current_model(model_id):
+    """Set the current model without processing images"""
     try:
-        with open(runs_file, "r") as f:
-            runs = json.load(f)
-    except Exception:
-        runs = []
-    runs.append(stats)
-    with open(runs_file, "w") as f:
-        json.dump(runs, f)
+        # Try to load the model to verify it works
+        load_specific_model(model_id)
+        print(json.dumps({
+            "success": True,
+            "model": model_id,
+            "message": f"Successfully switched to model: {model_id}"
+        }))
+        return True
+    except Exception as e:
+        print(json.dumps({
+            "success": False,
+            "error": str(e)
+        }))
+        return False
 
-    return stats
+def preprocess_image(img_path, target_size=(224, 224)):
+    """Preprocess a single image for prediction"""
+    img = image.load_img(img_path, target_size=target_size)
+    img_array = image.img_to_array(img)
+    img_array = np.expand_dims(img_array, axis=0)
+    img_array = img_array / 255.0  # Normalize pixel values
+    return img_array
+
+def process_image(img_path, model):
+    """Process a single image with the model"""
+    try:
+        # Preprocess image
+        img_array = preprocess_image(img_path)
+        
+        # Make prediction
+        prediction = model.predict(img_array)
+        
+        # Get class index and confidence
+        class_index = np.argmax(prediction[0])
+        confidence = float(prediction[0][class_index])
+        
+        # Determine result
+        is_frog = class_index == 1  # Assuming class 1 is "frog"
+        
+        return {
+            "filename": os.path.basename(img_path),
+            "path": img_path,
+            "is_frog": is_frog,
+            "confidence": confidence,
+            "class_index": int(class_index)
+        }
+    except Exception as e:
+        return {
+            "filename": os.path.basename(img_path),
+            "path": img_path,
+            "error": str(e)
+        }
+
+def process_directory(directory_path):
+    """Process all images in a directory using the current model"""
+    try:
+        # Load the current model
+        model = load_specific_model(current_model_id)
+        
+        # Check if directory exists
+        if not os.path.isdir(directory_path):
+            raise ValueError(f"Directory not found: {directory_path}")
+        
+        # Get all image files
+        image_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp']
+        image_files = []
+        
+        for ext in image_extensions:
+            image_files.extend(glob.glob(os.path.join(directory_path, f"*{ext}")))
+            image_files.extend(glob.glob(os.path.join(directory_path, f"*{ext.upper()}")))
+        
+        if not image_files:
+            raise ValueError(f"No image files found in directory: {directory_path}")
+        
+        # Process each image
+        results = []
+        frogs_count = 0
+        
+        for img_path in image_files:
+            result = process_image(img_path, model)
+            results.append(result)
+            
+            if result.get("is_frog", False):
+                frogs_count += 1
+        
+        # Create summary
+        summary = {
+            "total_images": len(results),
+            "frogs_detected": frogs_count,
+            "non_frogs": len(results) - frogs_count,
+            "detection_rate": frogs_count / len(results) if results else 0
+        }
+        
+        # Return full results
+        output = {
+            "success": True,
+            "modelUsed": current_model_id,
+            "results": results,
+            "summary": summary
+        }
+        
+        print(json.dumps(output))
+        return True
+    except Exception as e:
+        print(json.dumps({
+            "success": False,
+            "error": str(e)
+        }))
+        return False
+
+def list_available_models():
+    """List all available models and their status"""
+    available_models = []
+    
+    for model_id, model_file in MODEL_OPTIONS.items():
+        model_path = os.path.join(os.path.dirname(__file__), model_file)
+        available_models.append({
+            "id": model_id,
+            "name": model_id.replace("_", " ").title(),
+            "file": model_file,
+            "available": os.path.exists(model_path)
+        })
+    
+    return available_models
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Process images with different CNN models")
+    
+    # Add arguments
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument('--directory', type=str, help='Directory containing images to process')
+    group.add_argument('--set-model', type=str, help='Set the current CNN model')
+    group.add_argument('--list-models', action='store_true', help='List available CNN models')
+    group.add_argument('--image', type=str, help='Process a single image')
+    
+    args = parser.parse_args()
+    
+    if args.directory:
+        process_directory(args.directory)
+    elif args.set_model:
+        set_current_model(args.set_model)
+    elif args.list_models:
+        models = list_available_models()
+        print(json.dumps({
+            "success": True,
+            "models": models
+        }))
+    elif args.image:
+        try:
+            model = load_specific_model(current_model_id)
+            result = process_image(args.image, model)
+            print(json.dumps({
+                "success": True,
+                "modelUsed": current_model_id,
+                "result": result
+            }))
+        except Exception as e:
+            print(json.dumps({
+                "success": False,
+                "error": str(e)
+            }))
